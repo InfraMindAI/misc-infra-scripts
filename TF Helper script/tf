@@ -1,0 +1,35 @@
+#!/bin/bash
+
+set -e
+
+#Determine TF version, used by repo
+
+extract_version() {
+  version=`grep -F $1 $2 | cut -d'"' -f 2 | tr -dc '0-9.\n'`
+}
+
+if [ -f versions.tf ]; then
+  extract_version 'required_version' 'versions.tf'
+elif [ -f initialize.tf ]; then
+  extract_version 'required_version' 'initialize.tf'
+fi
+
+# Convert TF version to TF binary on bastion
+
+if [ -z $version ]; then
+  echo 'Error: cannot find TF binary.'
+ 
+  current_dir=${PWD##*/}
+ 
+  if ! grep -q 'env-' <<< $current_dir; then
+    echo 'Please make sure you are inside env-{ENV_NAME} directory.'
+  fi
+ 
+  exit 1
+else
+  # TF binary general rule to support future versions without modifying script as long as they are named tf{version}
+  binary="tf$version"
+fi
+
+# Run TF
+$binary "$@"

@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>App migration</title>
+    <style>
+      .input_div {
+        display: flex;
+      }
+
+      input {
+        flex: 1;
+      }
+
+      div:not(.input_div):not(.section) {
+        border: 1px solid black;
+        font-family: monospace;
+        white-space: pre;
+        position: relative;
+        overflow-y: auto;
+      }
+
+      div.hidden {
+        display: none;
+      }
+
+      button:active {
+        background-color:#A6FFF4;
+      }
+
+      button.copy {
+        position: absolute;
+        right: 0px;
+        top: 0px;
+        font-size: 50%;
+      }
+
+      .error {
+        background-color: #f2ced7;
+      }
+
+      .section {
+        display: none;
+      }
+    </style>
+  </head>
+<body onload="onLoad();">
+
+<script>
+  function onLoad() {
+    addCopyButtons();
+    addToggleButtons();
+    getById('section_1').style.display = 'block';
+  }
+
+  //Copy buttons
+
+  function addCopyButtons() {
+    for (const el of document.getElementsByClassName('copyable')) {
+      el.appendChild(createCopyButton());
+    };
+  }
+
+  function createCopyButton() {
+    const button = document.createElement("BUTTON");
+    button.innerHTML = "Copy";
+    button.className = 'copy';
+    button.contentEditable = false;
+
+    button.onclick = function() {
+      copy(this);
+    };
+
+    return button;
+  }
+
+  function copy(button) {
+    let element = button.parentElement;
+    let text = element.firstChild.nodeValue;
+
+    navigator.clipboard.writeText(text);
+  }
+
+  //Toggle buttons
+
+  function addToggleButtons() {
+    for (const el of document.getElementsByClassName('tfplan')) {
+      button = createToggleButton();
+      insertAfter(el, button);
+      toggle(button);
+    };
+  }
+
+  function createToggleButton() {
+    const button = document.createElement('BUTTON');
+
+    button.onclick = function() {
+      toggle(this);
+    };
+
+    return button;
+  }
+
+  function toggle(button) {
+    let div = button.previousElementSibling;
+
+    if (div.style.display === "none") {
+      div.style.display = "block";
+      button.innerHTML = "Hide typical TF plan";
+    } else {
+      div.style.display = "none";
+      button.innerHTML = "Show typical TF plan";
+    }
+  }
+
+  function insertAfter(referenceNode, newNode) {
+    referenceNode.parentNode.insertBefore(newNode, referenceNode.nextSibling);
+  }
+
+  //Cmd generating logic
+
+  var state = {
+    r53: {},
+    modulePaths: {},
+    shiftTrafficPercentage: 0,
+    allInputsValid: true
+  };
+
+  function resetValidation() {
+    state.allInputsValid = true;
+  }
+
+  function checkValidationOkOrThrow() {
+    if (!state.allInputsValid) {
+      throw("Input(s) should not be empty");
+    }
+  }
+
+  function readInput(inputId) {
+    const input = getById(inputId);
+    value = input.value;
+
+    if (value == '') {
+      input.focus();
+      input.className = 'error';
+      state.allInputsValid = false;
+    } else {
+      input.className = null;
+    }
+
+    return value;
+  }
+
+  function getDiv(id) {
+    return getById(id).firstChild;
+  }
+
+  function getById(id) {
+    return document.getElementById(id);
+  }
+
+  function generateEcsMigrationVar() {
+    return getDiv("ecsMigration").nodeValue
+      .replaceAll('[APP_NAME]', state.appName)
+      .replaceAll('[R53_ALIAS_NAME]', state.r53.aliasName)
+      .replaceAll('[TASK_DEFINITION_ARN]', state.taskDefinitionArn)
+      .replaceAll('[OLD_CLUSTER_NAME]', state.oldClusterName)
+      .replaceAll('[SHIFT_TRAFFIC_PERCENTAGE]', state.shiftTrafficPercentage);
+  }
+
+  function fillShiftTrafficCommands(shiftTrafficPercentage) {
+    state.shiftTrafficPercentage = shiftTrafficPercentage;
+    getDiv("tfToShiftTraffic").nodeValue = "tf plan -out plan.tfplan -var " + generateEcsMigrationVar();
+  }
+
+  currentStep = 1;
+
+  function showNextStep(button) {
+    switch(currentStep) {
+      case 1:
+        resetValidation();
+        state.appName = readInput('app_name');
+        state.oldRepoName = readInput('old_repo_name');
+        state.modulePaths.old = readInput('old_module_path');
+        state.modulePaths.new = readInput('new_module_path');
+        state.oldClusterName = readInput('old_cluster_name');
+        state.taskDefinitionArn = readInput('task_definition_arn');
+        checkValidationOkOrThrow();
+
+        state.env = getById("environment").value;
+        state.oldClusterName += "-" + state.env;
+
+        break;
+
+      case 2:
+        getDiv("showR53Record").nodeValue = getDiv("showR53Record").nodeValue
+          .replaceAll('[OLD_MODULE_PATH]', state.modulePaths.old);
+
+        break;
+
+      case 3:
+        resetValidation();
+        state.r53.id = readInput('r53_id');
+        state.r53.aliasName = readInput('r53_alias_name');
+        checkValidationOkOrThrow();
+
+        getDiv("mvStatements").nodeValue = getDiv("mvStatements").nodeValue
+          .replaceAll('[ENV]', state.env)
+          .replaceAll('[OLD_REPO_NAME]', state.oldRepoName)
+          .replaceAll('[OLD_MODULE_PATH]', state.modulePaths.old)
+          .replaceAll('[NEW_MODULE_PATH]', state.modulePaths.new);
+
+        break;
+
+      case 4:
+        ecsMigration = generateEcsMigrationVar();
+
+        getDiv("r53ImportStatement").nodeValue = getDiv("r53ImportStatement").nodeValue
+          .replaceAll('[ECS_MIGRATION]', ecsMigration)
+          .replaceAll('[NEW_MODULE_PATH]', state.modulePaths.new)
+          .replaceAll('[R53_ID]', state.r53.id);
+
+        break;
+
+      case 5:
+        getDiv("defaultPlan").nodeValue = getDiv("defaultPlan").nodeValue
+         .replaceAll('[ECS_MIGRATION]', ecsMigration);
+
+        break;
+
+      case 6:
+        getDiv("curl").nodeValue = getDiv("curl").nodeValue
+          .replaceAll('[APP_NAME]', state.appName)
+          .replaceAll('[ENV]', state.env);
+
+        break;
+
+      case 7:
+        fillShiftTrafficCommands(0);
+
+        break;
+
+      case 8:
+        if (state.shiftTrafficPercentage != 100) {
+          errorMessage = "You should move 100% of traffic to the new app to proceed.";
+          alert(errorMessage);
+          throw(errorMessage);
+        };
+
+        getDiv("clean").nodeValue = getDiv("clean").nodeValue
+          .replaceAll('[NEW_MODULE_PATH]', state.modulePaths.new)
+          .replaceAll('[TASK_DEFINITION_ARN]', state.taskDefinitionArn);
+
+        break;
+
+      case 9:
+        getDiv("removeR53").nodeValue = getDiv("removeR53").nodeValue
+          .replaceAll('[NEW_MODULE_PATH]', state.modulePaths.new)
+          .replaceAll('[TASK_DEFINITION_ARN]', state.taskDefinitionArn); 
+
+        break;
+
+      case 10:
+        getDiv("oldAppstateRm").nodeValue = getDiv("oldAppstateRm").nodeValue
+          .replaceAll('[OLD_MODULE_PATH]', state.modulePaths.old);
+
+        break;
+
+      case 11:
+        button.style.visibility = 'hidden';
+    }
+
+    getById('section_' + currentStep).style.display = 'none';
+    getById('section_' + (currentStep + 1)).style.display = 'block';
+
+    currentStep++;
+  }
+</script>
+
+<div class="section" id="section_1">
+<div class="input_div"><label>Enter old cluster name (without env at the end): </label><input type="text" id="old_cluster_name" value="customer-apps"></div>
+<div class="input_div"><label>Enter app name in TF repo: </label><input type="text" id="app_name" value="checkout"></div>
+<div class="input_div"><label>Enter old repository name: </label><input type="text" id="old_repo_name" value="customer_apps_services_tf"></div>
+<div class="input_div"><label>Enter old application module path: </label><input type="text" id="old_module_path" value="module.applications.module.checkout[0]"></div>
+<div class="input_div"><label>Enter new application module path: </label><input type="text" id="new_module_path" value="module.applications.module.checkout"></div>
+<div class="input_div"><label>Enter ARN of task definition in use: </label><input type="text" id="task_definition_arn"></div>
+Select environment: <select id="environment">
+  <option>alpha</option>
+  <option>dev</option>
+  <option>stag1</option>
+  <option>stag2</option>
+  <option>stag3</option>
+  <option>stag4</option>
+  <option>stag5</option>
+  <option>stag6</option>
+  <option>stag7</option>
+  <option>prod1</option>
+  <option>prod2</option>
+  <option>prod3</option>
+  <option>prod4</option>
+  <option>prod5</option>
+  <option>prod6</option>
+  <option>prod7</option>
+</select>
+</div>
+
+<div class="section" id="section_2">
+
+<div contenteditable class='copyable'>Plan/apply in customer_apps_tf:
+
+  # module.silo.module.aurora.aws_security_group_rule.rds_cluster_sg_rules[8] will be created
+  + resource "aws_security_group_rule" "rds_cluster_sg_rules" {
+      + cidr_blocks              = [
+          + "xx.xx.xx.xx/xx",
+          + "xx.xx.xx.xx/xx",
+        ]
+      + from_port                = {FROM_PORT}
+      + id                       = (known after apply)
+      + protocol                 = "tcp"
+      + security_group_id        = "sg-id"
+      + self                     = false
+      + source_security_group_id = (known after apply)
+      + to_port                  = {TO_PORT}
+      + type                     = "ingress"
+    }
+</div>
+</div>
+
+<div class="section" id="section_3">
+Run in old: <div id="showR53Record" class='copyable'>tf state show [OLD_MODULE_PATH].module.service_dns.aws_route53_record.main_migrated[0]</div>
+<div class="input_div"><label>Enter id: </label><input type="text" id="r53_id"></div>
+<div class="input_div"><label>Enter alias name: </label><input type="text" id="r53_alias_name"></div>
+</div>
+
+<div class="section" id="section_4">
+Run in both: <div class='copyable'>tf init</div>
+<div class='copyable'>tf state pull > state.tfstate</div><br>
+
+Run in new:
+<div id="mvStatements" class='copyable'>tf state mv -state=../../../[OLD_REPO_NAME]/[ENV]/env-[ENV]/state.tfstate -state-out=state.tfstate '[OLD_MODULE_PATH].aws_iam_policy_attachment.sqs_queues' '[NEW_MODULE_PATH].aws_iam_policy_attachment.sqs_queues'
+tf state mv -state=../../../[OLD_REPO_NAME]/[ENV]/env-[ENV]/state.tfstate -state-out=state.tfstate '[OLD_MODULE_PATH].module.secrets_rds' '[NEW_MODULE_PATH].module.secret_rds'
+tf state mv -state=../../../[OLD_REPO_NAME]/[ENV]/env-[ENV]/state.tfstate -state-out=state.tfstate '[OLD_MODULE_PATH].module.sqs' '[NEW_MODULE_PATH].module.sqs'
+tf state mv -state=../../../[OLD_REPO_NAME]/[ENV]/env-[ENV]/state.tfstate -state-out=state.tfstate '[OLD_MODULE_PATH].module.string_parameters' '[NEW_MODULE_PATH].module.parameters'
+tf state mv -state=../../../[OLD_REPO_NAME]/[ENV]/env-[ENV]/state.tfstate -state-out=state.tfstate '[OLD_MODULE_PATH].module.service.aws_cloudwatch_log_group.logging' '[NEW_MODULE_PATH].module.service.aws_cloudwatch_log_group.logging'
+tf state mv -state=../../../[OLD_REPO_NAME]/[ENV]/env-[ENV]/state.tfstate -state-out=state.tfstate '[OLD_MODULE_PATH].module.service.aws_cloudwatch_log_subscription_filter.ecs_service_to_shipper' '[NEW_MODULE_PATH].module.service.aws_cloudwatch_log_subscription_filter.ecs_service_to_shipper'
+tf state mv -state=../../../[OLD_REPO_NAME]/[ENV]/env-[ENV]/state.tfstate -state-out=state.tfstate '[OLD_MODULE_PATH].module.service.aws_cloudwatch_metric_alarm.cpu_util_alarm' '[NEW_MODULE_PATH].module.service.aws_cloudwatch_metric_alarm.cpu_util_alarm'
+tf state mv -state=../../../[OLD_REPO_NAME]/[ENV]/env-[ENV]/state.tfstate -state-out=state.tfstate '[OLD_MODULE_PATH].module.service.aws_cloudwatch_metric_alarm.cpu_util_alert' '[NEW_MODULE_PATH].module.service.aws_cloudwatch_metric_alarm.cpu_util_alert'
+tf state mv -state=../../../[OLD_REPO_NAME]/[ENV]/env-[ENV]/state.tfstate -state-out=state.tfstate '[OLD_MODULE_PATH].module.service.aws_cloudwatch_metric_alarm.max_cpu_util_alarm' '[NEW_MODULE_PATH].module.service.aws_cloudwatch_metric_alarm.max_cpu_util_alarm'
+tf state mv -state=../../../[OLD_REPO_NAME]/[ENV]/env-[ENV]/state.tfstate -state-out=state.tfstate '[OLD_MODULE_PATH].module.service.aws_cloudwatch_metric_alarm.max_cpu_util_alert' '[NEW_MODULE_PATH].module.service.aws_cloudwatch_metric_alarm.max_cpu_util_alert'
+tf state mv -state=../../../[OLD_REPO_NAME]/[ENV]/env-[ENV]/state.tfstate -state-out=state.tfstate '[OLD_MODULE_PATH].module.service.aws_cloudwatch_metric_alarm.memory_util_alert' '[NEW_MODULE_PATH].module.service.aws_cloudwatch_metric_alarm.memory_util_alert'
+tf state mv -state=../../../[OLD_REPO_NAME]/[ENV]/env-[ENV]/state.tfstate -state-out=state.tfstate '[OLD_MODULE_PATH].module.service.aws_ecr_repository.module' '[NEW_MODULE_PATH].module.service.aws_ecr_repository.module'
+tf state mv -state=../../../[OLD_REPO_NAME]/[ENV]/env-[ENV]/state.tfstate -state-out=state.tfstate '[OLD_MODULE_PATH].module.service.aws_ecr_lifecycle_policy.policy' '[NEW_MODULE_PATH].module.service.aws_ecr_lifecycle_policy.policy'
+tf state mv -state=../../../[OLD_REPO_NAME]/[ENV]/env-[ENV]/state.tfstate -state-out=state.tfstate '[OLD_MODULE_PATH].module.service.aws_iam_role.task' '[NEW_MODULE_PATH].module.service.aws_iam_role.task'
+tf state mv -state=../../../[OLD_REPO_NAME]/[ENV]/env-[ENV]/state.tfstate -state-out=state.tfstate '[OLD_MODULE_PATH].module.service.aws_iam_role_policy.cw_access' '[NEW_MODULE_PATH].module.service.aws_iam_role_policy.cw_access'
+tf state mv -state=../../../[OLD_REPO_NAME]/[ENV]/env-[ENV]/state.tfstate -state-out=state.tfstate '[OLD_MODULE_PATH].module.service.aws_iam_role_policy.task' '[NEW_MODULE_PATH].module.service.aws_iam_role_policy.task'</div><br>
+
+Run in both: <div class='copyable'>tf state push state.tfstate</div>
+
+</div>
+
+<div class="section" id="section_5">
+<div id="ecsMigration" class="hidden">'ecs_migration={"enabled":"true","app_name":"[APP_NAME]","dns":"[R53_ALIAS_NAME]","task_definition_arn":"[TASK_DEFINITION_ARN]","old_cluster_name":"[OLD_CLUSTER_NAME]","shift_traffic_percentage":[SHIFT_TRAFFIC_PERCENTAGE]}'</div>
+Run in new: <div id="r53ImportStatement" class='copyable'>tf import -var [ECS_MIGRATION] [NEW_MODULE_PATH].module.service_dns.aws_route53_record.weighted_main_migration[0] [R53_ID]</div>
+</div>
+
+<div class="section" id="section_6">
+Run in new: <div id="defaultPlan" class='copyable'>tf plan -out plan.tfplan -var [ECS_MIGRATION]</div>
+<div class="tfplan">Terraform will perform the following actions:
+
+  # module.applications.module.checkout.module.service.aws_alb_listener_rule.host_rule[0] will be created
+  + resource "aws_alb_listener_rule" "host_rule"
+
+  # module.applications.module.checkout.module.service.aws_alb_target_group.main[0] will be created
+  + resource "aws_alb_target_group" "main" {
+      + arn                                = (known after apply)
+      + arn_suffix                         = (known after apply)
+      + connection_termination             = false
+      + deregistration_delay               = "30"
+      + id                                 = (known after apply)
+      + ip_address_type                    = (known after apply)
+      + lambda_multi_value_headers_enabled = false
+      + load_balancing_algorithm_type      = "round_robin"
+      + name                               = (known after apply)
+      + port                               = {PORT}
+      + preserve_client_ip                 = (known after apply)
+      + protocol                           = "HTTP"
+      + protocol_version                   = (known after apply)
+      + proxy_protocol_v2                  = false
+      + slow_start                         = 0
+      + target_type                        = "ip"
+      + vpc_id                             = "{VPC_ID}"
+
+      + target_failover {
+          + on_deregistration = (known after apply)
+          + on_unhealthy      = (known after apply)
+        }
+    }
+
+  # module.applications.module.checkout.module.service.aws_ecs_service.fargate[0] will be created
+  + resource "aws_ecs_service" "fargate" {
+      + cluster                            = "{CLUSTER_ARN}"
+      + deployment_maximum_percent         = 200
+      + deployment_minimum_healthy_percent = 100
+      + desired_count                      = 0
+      + enable_ecs_managed_tags            = false
+      + enable_execute_command             = false
+      + health_check_grace_period_seconds  = 200
+      + iam_role                           = (known after apply)
+      + id                                 = (known after apply)
+      + launch_type                        = "FARGATE"
+      + name                               = "checkout-alpha"
+      + platform_version                   = "1.4.0"
+      + propagate_tags                     = "SERVICE"
+      + scheduling_strategy                = "REPLICA"
+      + task_definition                    = "{TASK_DEFINITION_ARN}"
+      + triggers                           = (known after apply)
+      + wait_for_steady_state              = false
+
+      + deployment_controller {
+          + type = "ECS"
+        }
+
+      + load_balancer {
+          + container_name   = "checkout-alpha"
+          + container_port   = {PORT}
+          + target_group_arn = (known after apply)
+        }
+
+      + network_configuration {
+          + assign_public_ip = false
+          + security_groups  = (known after apply)
+          + subnets          = [
+              + "subnet-01",
+              + "subnet-02",
+            ]
+        }
+    }
+
+  # module.applications.module.checkout.module.service_dns.aws_route53_record.weighted_main_migration[0] will be updated in-place
+  ~ resource "aws_route53_record" "weighted_main_migration" {
+        id             = "{ID}"
+        name           = "checkout.app"
+      + set_identifier = "main_migration"
+        # (5 unchanged attributes hidden)
+
+      + weighted_routing_policy {
+          + weight = 100
+        }
+
+        # (1 unchanged block hidden)
+    }
+
+  # module.applications.module.checkout.module.service_dns.aws_route53_record.weighted_new_migration[0] will be created
+  + resource "aws_route53_record" "weighted_new_migration" {
+      + allow_overwrite = (known after apply)
+      + fqdn            = (known after apply)
+      + id              = (known after apply)
+      + name            = "checkout.app"
+      + set_identifier  = "new_migration"
+      + type            = "A"
+      + zone_id         = "{ZONE_ID}"
+
+      + alias {
+          + evaluate_target_health = false
+          + name                   = "{DNS_NAME}"
+          + zone_id                = "{ZONE_ID}"
+        }
+
+      + weighted_routing_policy {
+          + weight = 0
+        }
+    }
+</div>
+<div class='copyable'>tf apply plan.tfplan</div>
+</div>
+
+<div class="section" id="section_7">
+Start service in new cluster, test: <div id="curl" class='copyable'>curl http://[APP_NAME].app.[ENV].company.com/monitoring</div>
+</div>
+
+<div class="section" id="section_8">
+<div class="input_div"><label>Enter % of traffic to shift to the new service: </label><input type="text" value="0" oninput="fillShiftTrafficCommands(this.value)"></div>
+Run in new: <div id="tfToShiftTraffic" class='copyable'>tf plan -out plan.tfplan -var [ECS_MIGRATION]</div>
+<div class="tfplan">Terraform will perform the following actions:
+
+  # module.applications.module.checkout.module.service_dns.aws_route53_record.weighted_main_migration[0] will be updated in-place
+  ~ resource "aws_route53_record" "weighted_main_migration" {
+        id             = "{ID}"
+        name           = "checkout.app"
+        # (6 unchanged attributes hidden)
+
+      ~ weighted_routing_policy {
+          ~ weight = 70 -> 0
+        }
+
+        # (1 unchanged block hidden)
+    }
+
+  # module.applications.module.checkout.module.service_dns.aws_route53_record.weighted_new_migration[0] will be updated in-place
+  ~ resource "aws_route53_record" "weighted_new_migration" {
+        id             = "{ID}"
+        name           = "checkout.app"
+        # (6 unchanged attributes hidden)
+
+      ~ weighted_routing_policy {
+          ~ weight = 30 -> 100
+        }
+
+        # (1 unchanged block hidden)
+    }
+
+Plan: 0 to add, 2 to change, 0 to destroy.
+</div>
+<div class='copyable'>tf apply plan.tfplan</div>
+</div>
+
+<div class="section" id="section_9">
+Run in new (clean after 100% move):
+<div id="clean" class='copyable'>tf state mv [NEW_MODULE_PATH].module.service_dns.aws_route53_record.weighted_new_migration[0] [NEW_MODULE_PATH].module.service_dns.aws_route53_record.main_migrated[0]
+tf import [NEW_MODULE_PATH].module.service.aws_ecs_task_definition.main[0] [TASK_DEFINITION_ARN]
+</div>
+</div>
+
+<div class="section" id="section_10">
+
+Run in new: <div id='removeR53' class='copyable'>tf plan -out plan.tfplan -target [NEW_MODULE_PATH].module.service_dns.aws_route53_record.weighted_main_migration[0]</div>
+<div class="tfplan">Terraform will perform the following actions:
+
+  # module.applications.module.checkout.module.service_dns.aws_route53_record.weighted_main_migration[0] will be destroyed
+  # (because index [0] is out of range for count)
+  - resource "aws_route53_record" "weighted_main_migration" {
+      - fqdn           = "{FQDN}" -> null
+      - id             = "{ID}" -> null
+      - name           = "checkout.app" -> null
+      - records        = [] -> null
+      - set_identifier = "main_migration" -> null
+      - ttl            = 0 -> null
+      - type           = "A" -> null
+      - zone_id        = "{ZONE_ID}" -> null
+
+      - alias {
+          - evaluate_target_health = false -> null
+          - name                   = "{DNS_NAME}" -> null
+          - zone_id                = "{ZONE_ID}" -> null
+        }
+
+      - weighted_routing_policy {
+          - weight = 0 -> null
+        }
+    }
+
+Plan: 0 to add, 0 to change, 1 to destroy.</div>
+
+<div class='copyable'>tf apply plan.tfplan</div><br>
+
+Run in new: <div class='copyable'>tf plan -out plan.tfplan</div>
+<div class="tfplan">Terraform will perform the following actions:
+
+  # module.applications.module.checkout.module.service_dns.aws_route53_record.main_migrated[0] will be updated in-place
+  ~ resource "aws_route53_record" "main_migrated" {
+        id             = "{ID}"
+        name           = "checkout.app"
+      - set_identifier = "new_migration" -> null
+        # (5 unchanged attributes hidden)
+
+      - weighted_routing_policy {
+          - weight = 100 -> null
+        }
+
+        # (1 unchanged block hidden)
+    }
+
+</div>
+
+<div class='copyable'>tf apply plan.tfplan</div>
+</div>
+
+<div class="section" id="section_11">
+Run in old: <div id="oldAppstateRm" class='copyable'>tf state rm [OLD_MODULE_PATH].module.service.aws_ecs_task_definition.main[0]
+tf state rm [OLD_MODULE_PATH].module.service.aws_security_group.task[0]
+tf state rm [OLD_MODULE_PATH].module.service.aws_security_group_rule.permit_all_lb_egress_fargate[0]
+tf state rm [OLD_MODULE_PATH].module.service.aws_security_group_rule.permit_all_task_egress[0]
+tf state rm [OLD_MODULE_PATH].module.service.aws_security_group_rule.permit_container_port_alb[0]
+tf state rm [OLD_MODULE_PATH].module.service.aws_security_group_rule.permit_vpn_to_task[0]
+tf state rm [OLD_MODULE_PATH].module.service_dns.aws_route53_record.main_migrated[0]</div>
+</div>
+
+<div class="section" id="section_12">
+Run in old: <div class='copyable'>tf plan -out plan.tfplan</div>
+<div class="tfplan">Terraform will perform the following actions:
+
+  # module.applications.module.checkout[0].module.service.aws_alb_listener_rule.host_rule[0] will be destroyed
+
+  # module.applications.module.checkout[0].module.service.aws_alb_target_group.main[0] will be destroyed
+
+  # module.applications.module.checkout[0].module.service.aws_ecs_service.fargate[0] will be destroyed
+</div>
+
+<div class='copyable'>tf apply plan.tfplan</div>
+
+<br>
+Congratulations: all steps are finished!
+
+</div>
+
+<br>
+<button onclick='showNextStep(this)'>Next step</button>
+
+</body>
+</html>
